@@ -64,7 +64,7 @@ node src/cli.mjs --dir examples/smoke --verify
 
 ## Repository contents and privacy
 
-Only debugger source, a generic verification page, geometry metadata and measurement scripts are tracked. Local app directories, original photographs, recordings, screenshots, build products and verification output are ignored. Loading a remote PWA still makes its normal network requests. Preview state is ephemeral and separate from Safari and installed PWAs.
+Only debugger source, a generic verification page, geometry metadata and measurement scripts are tracked. Local app directories, original photographs, recordings, screenshots, build products and verification output are ignored. Loading a remote PWA still makes its normal network requests. Preview storage is persistent and separate from Safari and installed PWAs. Use a stable `--port` for local previews to retain the same storage origin across restarts.
 
 ## Status and permissions
 
@@ -73,3 +73,11 @@ Version 0.1.0, macOS developer tooling. A preview cannot exactly reproduce an iP
 ## Included calibration assets
 
 The [iPhone 12 Pro Max asset pack](calibration/iphone-12-pro-max/) includes the original seven generated reference images and complete transparent SVG screen masks in both orientations. Original photographs remain excluded.
+
+## Live local development
+
+`--dir` serves current source directly and watches source edits. Both views reload automatically after a short debounce; offline worker caching is bypassed in local directory mode. Existing windows stay in place. `src/version.js`, when present, gets a visible local development suffix for every revision. Use `--port 49321` to keep a stable storage origin across restarts.
+
+Before reload, the debugger dispatches `debugger-before-reload`. Apps can register asynchronous save work using `event.detail.waitUntil(savePromise)`. A rejected save prevents reload. Project synchronization is app-specific: this generic debugger does not infer an arbitrary PWA's state. A local app adapter can use BroadcastChannel between the two same-origin windows; the injected `window.__PWA_DEVICE_DEBUGGER__` flag identifies local directory mode.
+
+Touch simulation: normal drag is one touch; Shift-drag moves two touches together; Command-drag expands two touches about a fixed center; Shift-Command-drag reverses the radial movement and clamps the pair at 24 CSS pixels. Modifier previews are visual only until pressed. Scroll inertia follows released gestures where scrolling is allowed; Play controls with `touch-action:none` remain locked.

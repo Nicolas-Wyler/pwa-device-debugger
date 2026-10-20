@@ -7,7 +7,7 @@ if(args.includes('--help')||(!value('--url')&&!value('--dir'))){console.log('PWA
 if(value('--url')&&value('--dir'))throw Error('Choose --url OR --dir');
 const profilePath=path.resolve(value('--profile')||root+'profiles/iphone-12-pro-max.json');const profile=JSON.parse(await readFile(profilePath,'utf8'));
 const segments=JSON.parse(await readFile(path.resolve(path.dirname(profilePath),profile.segments),'utf8'));
-let server;let url=value('--url');if(value('--dir')){const local=await serve(value('--dir'));server=local.server;url=local.url}
+let server;let url=value('--url');if(value('--dir')){const local=await serve(value('--dir'),Number(value('--port')||0));server=local.server;url=local.url}
 const parsed=new URL(url);if(!['https:','http:'].includes(parsed.protocol))throw Error('Only http(s) URLs are supported');
 const opacity=Number(value('--keyboard-opacity')??'0.45');if(!Number.isFinite(opacity)||opacity<0||opacity>1)throw Error('Keyboard opacity must be between 0 and 1');
 async function keyboardFile(option,local){const explicit=value(option);if(explicit){const file=path.resolve(explicit);await access(file);return file;}try{await access(root+local);return root+local}catch{return null}}

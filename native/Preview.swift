@@ -30,6 +30,56 @@ final class RetinaWindow:NSWindow {
 final class PassiveImage:NSImageView {
     override func hitTest(_ point:NSPoint)->NSView? {nil}
 }
+// Native-only feedback: never participates in page layout or hit testing.
+final class TouchFeedback:NSView {
+    var dot:CALayer?
+    var pair:[CALayer]=[]
+    var center:NSPoint?
+    var pinching=false
+    var inversePinch=false
+    var translating=false
+    override var isFlipped:Bool {true}
+    override func hitTest(_ point:NSPoint)->NSView? {nil}
+    func showPair(_ point:NSPoint,active:Bool,inverse:Bool=false,translate:Bool=false){
+        wantsLayer=true
+        if !active || center == nil {translating=translate;inversePinch=inverse;center=NSPoint(x:point.x-(inverse ? 60:12),y:point.y)}
+        if translating {center=NSPoint(x:point.x-12,y:point.y)}
+        guard let c=center else{return}
+        CATransaction.begin();CATransaction.setDisableActions(true)
+        if pair.isEmpty {
+            for size:CGFloat in [18,18,4] {
+                let l=CALayer();l.bounds=CGRect(x:0,y:0,width:size,height:size);l.cornerRadius=size/2
+                layer?.addSublayer(l);pair.append(l)
+            }
+        }
+        let dx=point.x-c.x,dy=point.y-c.y,distance=hypot(dx,dy)
+        let radius=inversePinch ? max(12,120-distance):distance
+        let ux=distance>0.001 ? dx/distance:1,uy=distance>0.001 ? dy/distance:0
+        let first=NSPoint(x:c.x+ux*radius,y:c.y+uy*radius)
+        let positions=[first,NSPoint(x:2*c.x-first.x,y:2*c.y-first.y),c]
+        for (i,l) in pair.enumerated(){l.position=positions[i];l.backgroundColor=NSColor.white.withAlphaComponent(active ? 0.3:0.1).cgColor;l.borderColor=NSColor.white.withAlphaComponent(active ? 0.85:0.45).cgColor;l.borderWidth=active ? 1.5:1}
+        CATransaction.commit()
+    }
+    func clearPair(){pair.forEach{$0.removeFromSuperlayer()};pair=[];center=nil;pinching=false}
+    func begin(_ point:NSPoint){
+        dot?.removeFromSuperlayer();wantsLayer=true
+        let circle=CALayer();circle.bounds=CGRect(x:0,y:0,width:18,height:18)
+        circle.position=point;circle.cornerRadius=9
+        circle.backgroundColor=NSColor.white.withAlphaComponent(0.28).cgColor
+        circle.borderColor=NSColor.white.withAlphaComponent(0.5).cgColor;circle.borderWidth=1
+        layer?.addSublayer(circle);dot=circle
+        let pop=CAKeyframeAnimation(keyPath:"transform.scale")
+        pop.values=[0.25,1.45,1];pop.keyTimes=[0,0.55,1];pop.duration=0.12
+        circle.add(pop,forKey:"pop")
+    }
+    func move(_ point:NSPoint){CATransaction.begin();CATransaction.setDisableActions(true);dot?.position=point;CATransaction.commit()}
+    func end(){
+        guard let circle=dot else{return};dot=nil
+        let fade=CABasicAnimation(keyPath:"opacity");fade.fromValue=1;fade.toValue=0;fade.duration=0.14
+        circle.opacity=0;circle.add(fade,forKey:"fade")
+        DispatchQueue.main.asyncAfter(deadline:.now()+0.15){circle.removeFromSuperlayer()}
+    }
+}
 final class HomeIndicator:NSView {
     override var isFlipped:Bool {true}
     override func hitTest(_ point:NSPoint)->NSView? {nil}
@@ -95,6 +145,7 @@ final class Shell:NSView {
     let fade=Fade()
     let keyboard=PassiveImage()
     let home=HomeIndicator()
+    let touch=TouchFeedback()
     var keyboardShown=false {didSet {needsLayout=true}}
     var landscape=false
     let phone:NSSize
@@ -105,7 +156,7 @@ final class Shell:NSView {
         phone=landscape ? NSSize(width:config.profile.height,height:config.profile.width):NSSize(width:config.profile.width,height:config.profile.height)
         super.init(frame:frame)
         wantsLayer=true;layer?.backgroundColor=NSColor(calibratedWhite:0.15,alpha:1).cgColor
-        addSubview(stage);stage.addSubview(web);stage.addSubview(keyboard);stage.addSubview(home);stage.addSubview(fade)
+        addSubview(stage);stage.addSubview(web);stage.addSubview(keyboard);stage.addSubview(home);stage.addSubview(fade);stage.addSubview(touch)
         if let imagePath=(landscape ? config.keyboardLandscapePath : config.keyboardPath) {keyboard.image=NSImage(contentsOfFile:imagePath)}
         keyboard.alphaValue=CGFloat(config.keyboardOpacity ?? 0.45)
         keyboard.imageScaling = .scaleAxesIndependently;keyboard.isHidden=true
@@ -126,11 +177,12 @@ final class Shell:NSView {
         let height=phone.width*imageSize.height/imageSize.width
         keyboard.frame=NSRect(x:0,y:0,width:phone.width,height:height)
         keyboard.isHidden = !keyboardShown || keyboard.image == nil
+        touch.frame=web.frame
         home.frame=web.frame;home.needsDisplay=true
         home.isHidden=false
     }
 }
-final class Host:NSObject,NSApplicationDelegate,NSWindowDelegate,WKScriptMessageHandler {
+final class Host:NSObject,NSApplicationDelegate,NSWindowDelegate,WKScriptMessageHandler,WKNavigationDelegate {
     var windows:[NSWindow]=[];var views:[WKWebView]=[];var shells:[Shell]=[]
     var reports:[String:[String:Any]]=[:]
     var baselines:[String:[String:Any]]=[:]
@@ -152,12 +204,17 @@ final class Host:NSObject,NSApplicationDelegate,NSWindowDelegate,WKScriptMessage
         reports[orientation]=checked;print("CHECK \(data)");fflush(stdout)
         if config.verify {try? JSONSerialization.data(withJSONObject:reports,options:[.prettyPrinted,.sortedKeys]).write(to:URL(fileURLWithPath:config.output+"/verification.json"))}
     }
+    func webView(_ webView:WKWebView,didFailProvisionalNavigation navigation:WKNavigation!,withError error:Error){print("NAVIGATION FAILED: \(error)");fflush(stdout)}
+    func webView(_ webView:WKWebView,didFail navigation:WKNavigation!,withError error:Error){print("NAVIGATION FAILED: \(error)");fflush(stdout)}
+    func webView(_ webView:WKWebView,didFinish navigation:WKNavigation!){
+        webView.evaluateJavaScript("JSON.stringify({title:document.title,bodyCharacters:document.body?.innerText.length||0})"){value,error in print("PAGE LOADED: \(value ?? "unknown") \(error?.localizedDescription ?? "")");fflush(stdout)}
+    }
     func applicationDidFinishLaunching(_ notification:Notification){
         NSApp.setActivationPolicy(.regular)
         let menu=NSMenu();let appMenu=NSMenuItem();menu.addItem(appMenu);let submenu=NSMenu();submenu.addItem(withTitle:"Quit",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q");appMenu.submenu=submenu;NSApp.mainMenu=menu
         for (i,orientation) in ["portrait","landscape"].enumerated(){
             let landscape=orientation=="landscape"
-            let settings=WKWebViewConfiguration();settings.websiteDataStore = .nonPersistent();settings.mediaTypesRequiringUserActionForPlayback=[]
+            let settings=WKWebViewConfiguration();settings.websiteDataStore = .default();settings.mediaTypesRequiringUserActionForPlayback=[]
             settings.userContentController.add(self,name:"report");settings.userContentController.add(self,name:"keyboard")
             let insets=config.profile.safeAreas[orientation]!
             let vars=zip(["top","right","bottom","left"],insets).map{"--debug-safe-\($0.0):\($0.1)px"}.joined(separator:";")
@@ -184,8 +241,24 @@ final class Host:NSObject,NSApplicationDelegate,NSWindowDelegate,WKScriptMessage
             let window=RetinaWindow(contentRect:NSRect(origin:NSPoint(x:70+i*460,y:100),size:size),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
             window.title="\(config.profile.name) \(orientation) · PWA debugger";window.delegate=self;window.isReleasedWhenClosed=false
             let shell=Shell(frame:NSRect(origin:.zero,size:size),web:web,landscape:landscape);shells.append(shell);window.contentView=shell
+            window.acceptsMouseMovedEvents=true
             windows.append(window);views.append(web);window.makeKeyAndOrderFront(nil)
+            web.navigationDelegate=self
             web.load(URLRequest(url:URL(string:config.url)!))
+        }
+        NSEvent.addLocalMonitorForEvents(matching:[.leftMouseDown,.leftMouseDragged,.leftMouseUp,.mouseMoved,.flagsChanged]){[weak self] event in
+            guard let self=self,let index=self.windows.firstIndex(where:{$0 === event.window}) else{return event}
+            let overlay=self.shells[index].touch
+            let point=overlay.convert(event.locationInWindow,from:nil)
+            if event.type == .flagsChanged || event.type == .mouseMoved {
+                if !overlay.pinching {if (event.modifierFlags.contains(.command) || event.modifierFlags.contains(.shift)) && overlay.bounds.contains(point){overlay.showPair(point,active:false,inverse:event.modifierFlags.contains(.shift) && event.modifierFlags.contains(.command),translate:!event.modifierFlags.contains(.command))}else{overlay.clearPair()}}
+            }
+            else if event.type == .leftMouseDown {if overlay.bounds.contains(point){
+                if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.shift){overlay.center=nil;overlay.pinching=true;overlay.showPair(point,active:true,inverse:event.modifierFlags.contains(.shift) && event.modifierFlags.contains(.command),translate:!event.modifierFlags.contains(.command))}else{overlay.clearPair();overlay.begin(point)}
+            }}
+            else if event.type == .leftMouseDragged {if overlay.pinching{overlay.showPair(point,active:true)}else{overlay.move(point)}}
+            else {overlay.end();overlay.clearPair();if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.shift){overlay.showPair(point,active:false,inverse:event.modifierFlags.contains(.shift) && event.modifierFlags.contains(.command),translate:!event.modifierFlags.contains(.command))}}
+            return event
         }
         NSApp.activate(ignoringOtherApps:true)
         if config.verify {
@@ -221,7 +294,17 @@ final class Host:NSObject,NSApplicationDelegate,NSWindowDelegate,WKScriptMessage
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{true}
     static let touchScript="""
-    let held=null,pan=null;
+    let held=null,pan=null,pinch=null,momentum=null,coastFrame=0;
+    function stopCoast(){if(coastFrame)cancelAnimationFrame(coastFrame);coastFrame=0;}
+    function beginMomentum(target){stopCoast();const a=scrollTarget(target);momentum=a?{...a,last:performance.now(),left:a.el.scrollLeft,top:a.el.scrollTop,vx:0,vy:0}:null;}
+    function sampleMomentum(){if(!momentum)return;const m=momentum,now=performance.now(),dt=Math.max(1,now-m.last),dx=m.el.scrollLeft-m.left,dy=m.el.scrollTop-m.top;if(dx||dy){m.vx=dx/dt;m.vy=dy/dt;m.last=now;m.left=m.el.scrollLeft;m.top=m.el.scrollTop;}}
+    function releaseMomentum(cancel=false){
+      const m=momentum;momentum=null;
+      if(cancel||!m||performance.now()-m.last>90)return;
+      let vx=m.allowX?Math.max(-3,Math.min(3,m.vx)):0,vy=m.allowY?Math.max(-3,Math.min(3,m.vy)):0,last=performance.now();
+      function step(now){const dt=Math.min(32,now-last);last=now;const x=m.el.scrollLeft,y=m.el.scrollTop;m.el.scrollLeft+=vx*dt;m.el.scrollTop+=vy*dt;if(Math.abs(m.el.scrollLeft-x)<0.1)vx=0;if(Math.abs(m.el.scrollTop-y)<0.1)vy=0;const decay=Math.exp(-dt/180);vx*=decay;vy*=decay;if(Math.hypot(vx,vy)>0.015)coastFrame=requestAnimationFrame(step);else coastFrame=0;}
+      if(Math.hypot(vx,vy)>0.015)coastFrame=requestAnimationFrame(step);
+    }
     function scrollTarget(target){
       let allowX=true,allowY=true,candidate=null;
       for(let el=target;el&&el.nodeType===1;el=el.parentElement){
@@ -233,11 +316,31 @@ final class Host:NSObject,NSApplicationDelegate,NSWindowDelegate,WKScriptMessage
       }
       return candidate?{el:candidate,allowX,allowY}:null;
     }
-    addEventListener('blur',()=>{if(held){held.dispatchEvent(new PointerEvent('pointercancel',{bubbles:true,pointerId:1,pointerType:'touch',isPrimary:true}));held=null;}});
+    addEventListener('blur',()=>{stopCoast();momentum=null;if(pinch){pinch.targets.forEach((target,i)=>target.dispatchEvent(new PointerEvent('pointercancel',{bubbles:true,pointerId:700+i,pointerType:'touch',isPrimary:i===0})));pinch=null;}if(held){held.dispatchEvent(new PointerEvent('pointercancel',{bubbles:true,pointerId:1,pointerType:'touch',isPrimary:true}));held=null;}});
     for(const type of ['pointerover','pointerout','pointerenter','pointerleave','mouseover','mouseout','mouseenter','mouseleave','mousemove','wheel'])document.addEventListener(type,e=>{e.stopImmediatePropagation();if(e.cancelable)e.preventDefault();},true);
 
     for(const type of ['pointerdown','pointermove','pointerup','pointercancel'])document.addEventListener(type,e=>{
       if(e.pointerType!=='mouse')return;
+      if(type==='pointerdown')beginMomentum(e.target);
+      if(type==='pointerdown' && e.button===0 && (e.metaKey||e.shiftKey)){
+        const translate=!e.metaKey,inverse=e.metaKey&&e.shiftKey,offset=inverse?60:12;
+        const center={x:e.clientX-offset,y:e.clientY};
+        pinch={center,inverse,translate,targets:[e.target,document.elementFromPoint(e.clientX-2*offset,e.clientY)||e.target]};
+      }
+      if(pinch){
+        e.stopImmediatePropagation();e.preventDefault();
+        if(pinch.translate){pinch.center={x:e.clientX-12,y:e.clientY};}
+        const p=pinch,dx=e.clientX-p.center.x,dy=e.clientY-p.center.y,distance=Math.hypot(dx,dy);
+        const radius=p.inverse?Math.max(12,120-distance):distance;
+        const firstX=p.center.x+(distance>0.001?dx/distance:1)*radius,firstY=p.center.y+(distance>0.001?dy/distance:0)*radius;
+        for(let i=0;i<2;i++){
+          const x=i?2*p.center.x-firstX:firstX,y=i?2*p.center.y-firstY:firstY;
+          p.targets[i].dispatchEvent(new PointerEvent(type,{bubbles:true,cancelable:true,composed:true,pointerType:'touch',pointerId:700+i,isPrimary:i===0,clientX:x,clientY:y,button:0,buttons:type==='pointerup'||type==='pointercancel'?0:1,pressure:type==='pointerup'?0:0.5}));
+        }
+        sampleMomentum();
+        if(type==='pointerup'||type==='pointercancel'){releaseMomentum(type==='pointercancel');pinch=null;}
+        return;
+      }
       if(type==='pointerdown'){if(e.button!==0){e.stopImmediatePropagation();e.preventDefault();return;}held=e.target;const area=scrollTarget(held);pan=area?{...area,x:e.clientX,y:e.clientY,left:area.el.scrollLeft,top:area.el.scrollTop,moving:false}:null;}
       if(!held){e.stopImmediatePropagation();e.preventDefault();return;}
       if(type==='pointermove' && !e.buttons){const target=held;held=null;target.dispatchEvent(new PointerEvent('pointercancel',{bubbles:true,pointerId:e.pointerId,pointerType:'touch',isPrimary:true}));e.stopImmediatePropagation();e.preventDefault();return;}
@@ -253,7 +356,8 @@ final class Host:NSObject,NSApplicationDelegate,NSWindowDelegate,WKScriptMessage
         }
       }
       if(type==='pointerdown'&&target.matches?.('input:not([type=button]):not([type=submit]):not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]),textarea,[contenteditable=true]'))target.focus({preventScroll:true});
-      if(type==='pointerup'||type==='pointercancel'){held=null;pan=null;}
+      sampleMomentum();
+      if(type==='pointerup'||type==='pointercancel'){releaseMomentum(type==='pointercancel');held=null;pan=null;}
     },true);
     """
 }
