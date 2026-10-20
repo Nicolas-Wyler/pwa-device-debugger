@@ -64,8 +64,12 @@ node src/cli.mjs --dir examples/smoke --verify
 
 ## Repository contents and privacy
 
-Only debugger source, a generic verification page, geometry metadata and measurement scripts are tracked. Local app directories, original photographs, generated references, recordings, screenshots, build products and verification output are ignored. Loading a remote PWA still makes its normal network requests. Preview state is ephemeral and separate from Safari and installed PWAs.
+Only debugger source, a generic verification page, geometry metadata and measurement scripts are tracked. Local app directories, original photographs, recordings, screenshots, build products and verification output are ignored. Loading a remote PWA still makes its normal network requests. Preview state is ephemeral and separate from Safari and installed PWAs.
 
 ## Status and permissions
 
 Version 0.1.0, macOS developer tooling. A preview cannot exactly reproduce an iPhone's iOS engine, hardware, audio session or permissions. The geometry is an approximation from photographs, not an official Apple drawing. Publication does not by itself grant a software license; contact the repository owner for reuse permissions until an explicit license is chosen.
+
+## Included calibration assets
+
+The [iPhone 12 Pro Max asset pack](calibration/iphone-12-pro-max/) includes the original seven generated reference images and complete transparent SVG screen masks in both orientations. Original photographs remain excluded.

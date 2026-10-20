@@ -62,4 +62,4 @@ The fitter normalizes coordinates to the reference phone aspect for fitting and 
 
 Reproject the fitted geometry to the original photographs with the saved homography, and compare against independently captured views. Check notch shoulders, all four corners and straight edges. Record discrepancies and confidence rather than claiming exact hardware pixels from camera photographs. The scripts save the homography and extracted mask for this purpose; cross-view validation remains a manual step.
 
-Original pictures, generated references, fitted results and reports belong in `artifacts/`, which is excluded from Git.
+Original pictures, new fitted results and reports belong in `artifacts/`, which is excluded from Git. The explicitly published generated reference patterns and fitted masks for the iPhone 12 Pro Max are in `calibration/iphone-12-pro-max/`.
