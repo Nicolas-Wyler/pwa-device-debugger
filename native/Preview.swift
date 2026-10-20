@@ -144,7 +144,7 @@ final class Host:NSObject,NSApplicationDelegate,NSWindowDelegate,WKScriptMessage
         checked["passed"] = (data["width"] as? Double == Double(expectedWidth)) && (data["height"] as? Double == Double(expectedHeight)) && ((data["dpr"] as? Double ?? 0) >= Double(config.profile.minimumDensity))
         if let before=baselines[orientation]?["layout"] as? NSDictionary,let after=data["layout"] as? NSDictionary {checked["layoutUnchanged"] = before.isEqual(to:after as! [AnyHashable:Any])}
         if let idle=data["inputIdleEvents"] {checked["inputIdleEvents"]=idle}
-        else if let old=reports[orientation] {for key in ["inputIdleEvents","inputEvents"] {checked[key]=old[key]}}
+        else if let old=reports[orientation] {for key in ["inputIdleEvents","inputEvents","allowedPanPixels","lockedPanPixels"] {checked[key]=old[key]}}
         reports[orientation]=checked;print("CHECK \(data)");fflush(stdout)
         if config.verify {try? JSONSerialization.data(withJSONObject:reports,options:[.prettyPrinted,.sortedKeys]).write(to:URL(fileURLWithPath:config.output+"/verification.json"))}
     }
@@ -197,7 +197,11 @@ final class Host:NSObject,NSApplicationDelegate,NSWindowDelegate,WKScriptMessage
                         const send=(type,buttons=0)=>probe.dispatchEvent(new PointerEvent(type,{bubbles:true,cancelable:true,pointerType:'mouse',pointerId:987,button:0,buttons,clientX:15,clientY:15}));
                         send('pointerover');send('pointermove');const idle=seen.length;
                         send('pointerdown',1);send('pointermove',1);send('pointerup');send('pointermove');
-                        window.webkit.messageHandlers.report.postMessage({orientation:'\(i==0 ? "portrait":"landscape")',width:innerWidth,height:innerHeight,dpr:devicePixelRatio,inputIdleEvents:idle,inputEvents:seen});probe.remove();report();
+                        probe.remove();
+                        const area=document.createElement('div');area.style.cssText='position:fixed;left:10px;top:10px;width:120px;height:60px;overflow:auto;touch-action:pan-x;z-index:999999';area.innerHTML='<div style="width:600px;height:40px"></div>';document.body.append(area);
+                        const drag=()=>{for(const [type,x,buttons] of [['pointerdown',90,1],['pointermove',30,1],['pointerup',30,0]])area.dispatchEvent(new PointerEvent(type,{bubbles:true,cancelable:true,pointerType:'mouse',pointerId:988,button:0,buttons,clientX:x,clientY:30}));};
+                        drag();const allowedPanPixels=area.scrollLeft;area.scrollLeft=0;area.style.touchAction='none';drag();const lockedPanPixels=area.scrollLeft;area.remove();
+                        window.webkit.messageHandlers.report.postMessage({orientation:'\(i==0 ? "portrait":"landscape")',width:innerWidth,height:innerHeight,dpr:devicePixelRatio,inputIdleEvents:idle,inputEvents:seen,allowedPanPixels,lockedPanPixels});report();
                         })()
                         """,completionHandler:nil)
                         let snap=WKSnapshotConfiguration();snap.snapshotWidth=NSNumber(value:Double(web.bounds.width*max(2,web.window?.backingScaleFactor ?? 2)))
@@ -213,20 +217,39 @@ final class Host:NSObject,NSApplicationDelegate,NSWindowDelegate,WKScriptMessage
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{true}
     static let touchScript="""
-    let held=null;
+    let held=null,pan=null;
+    function scrollTarget(target){
+      let allowX=true,allowY=true,candidate=null;
+      for(let el=target;el&&el.nodeType===1;el=el.parentElement){
+        const style=getComputedStyle(el),action=style.touchAction;
+        if(action==='none'){allowX=false;allowY=false;}
+        else if(action.includes('pan-x')&&!action.includes('pan-y'))allowY=false;
+        else if(action.includes('pan-y')&&!action.includes('pan-x'))allowX=false;
+        if(!candidate&&((/auto|scroll/.test(style.overflowX)&&el.scrollWidth>el.clientWidth)||(/auto|scroll/.test(style.overflowY)&&el.scrollHeight>el.clientHeight)))candidate=el;
+      }
+      return candidate?{el:candidate,allowX,allowY}:null;
+    }
     addEventListener('blur',()=>{if(held){held.dispatchEvent(new PointerEvent('pointercancel',{bubbles:true,pointerId:1,pointerType:'touch',isPrimary:true}));held=null;}});
     for(const type of ['pointerover','pointerout','pointerenter','pointerleave','mouseover','mouseout','mouseenter','mouseleave','mousemove','wheel'])document.addEventListener(type,e=>{e.stopImmediatePropagation();if(e.cancelable)e.preventDefault();},true);
 
     for(const type of ['pointerdown','pointermove','pointerup','pointercancel'])document.addEventListener(type,e=>{
       if(e.pointerType!=='mouse')return;
-      if(type==='pointerdown'){if(e.button!==0){e.stopImmediatePropagation();e.preventDefault();return;}held=e.target;}
+      if(type==='pointerdown'){if(e.button!==0){e.stopImmediatePropagation();e.preventDefault();return;}held=e.target;const area=scrollTarget(held);pan=area?{...area,x:e.clientX,y:e.clientY,left:area.el.scrollLeft,top:area.el.scrollTop,moving:false}:null;}
       if(!held){e.stopImmediatePropagation();e.preventDefault();return;}
       if(type==='pointermove' && !e.buttons){const target=held;held=null;target.dispatchEvent(new PointerEvent('pointercancel',{bubbles:true,pointerId:e.pointerId,pointerType:'touch',isPrimary:true}));e.stopImmediatePropagation();e.preventDefault();return;}
       const target=(type==='pointerdown'||type==='pointerup'||type==='pointercancel'||held.hasPointerCapture?.(e.pointerId))?held:(document.elementFromPoint(e.clientX,e.clientY)||held);
       const touch=new PointerEvent(type,{bubbles:true,cancelable:true,composed:true,pointerId:e.pointerId,pointerType:'touch',isPrimary:true,button:e.button,buttons:e.buttons,clientX:e.clientX,clientY:e.clientY,screenX:e.screenX,screenY:e.screenY,pressure:type==='pointerup'?0:.5,ctrlKey:e.ctrlKey,metaKey:e.metaKey,shiftKey:e.shiftKey,altKey:e.altKey});
       e.stopImmediatePropagation();e.preventDefault();target.dispatchEvent(touch);
+      if(type==='pointermove'&&pan&&!touch.defaultPrevented){
+        const dx=e.clientX-pan.x,dy=e.clientY-pan.y;
+        if((pan.allowX&&Math.abs(dx)>8)||(pan.allowY&&Math.abs(dy)>8)){
+          if(!pan.moving){held.dispatchEvent(new PointerEvent('pointercancel',{bubbles:true,pointerId:e.pointerId,pointerType:'touch',isPrimary:true}));pan.moving=true;}
+          if(pan.allowX)pan.el.scrollLeft=pan.left-dx;
+          if(pan.allowY)pan.el.scrollTop=pan.top-dy;
+        }
+      }
       if(type==='pointerdown'&&target.matches?.('input:not([type=button]):not([type=submit]):not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]),textarea,[contenteditable=true]'))target.focus({preventScroll:true});
-      if(type==='pointerup'||type==='pointercancel')held=null;
+      if(type==='pointerup'||type==='pointercancel'){held=null;pan=null;}
     },true);
     """
 }
