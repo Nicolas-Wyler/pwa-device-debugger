@@ -1,0 +1,25 @@
+{
+  "name": "iPhone 12 Pro Max",
+  "width": 428,
+  "height": 926,
+  "nativeWidth": 1284,
+  "nativeHeight": 2778,
+  "minimumDensity": 2,
+  "segments": "iphone-12-pro-max-segments.json",
+  "measuredOrientation": "landscape-notch-left",
+  "safeAreas": {
+    "portrait": [
+      47,
+      0,
+      34,
+      0
+    ],
+    "landscape": [
+      0,
+      47,
+      21,
+      47
+    ]
+  },
+  "provenance": "Approximate photo-derived model, with shared axis-aligned cubic corners and mirrored notch transitions; not an Apple-certified geometry. Photographic lens/threshold uncertainty is not calibrated. Safe-area values are conventional preview inputs, not measured physical edges."
+}

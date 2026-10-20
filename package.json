@@ -1,0 +1,1 @@
+{"name":"pwa-device-debugger","version":"0.1.0","private":true,"type":"module","engines":{"node":">=20"},"scripts":{"start":"node src/cli.mjs","test":"node --test tests/*.test.mjs","build":"node src/build.mjs"}}

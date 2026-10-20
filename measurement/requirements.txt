@@ -1,0 +1,6 @@
+numpy>=2.0,<3
+Pillow>=11,<13
+pillow-heif>=0.20,<2
+opencv-python-headless>=4.10,<6
+scipy>=1.13,<2
+matplotlib>=3.9,<4

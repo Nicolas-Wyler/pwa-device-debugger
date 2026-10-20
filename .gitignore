@@ -1,0 +1,11 @@
+/build/
+/artifacts/
+/.venv/
+/node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+*.HEIC
+*.heic
+*.MOV
+*.mov
