@@ -21,7 +21,9 @@ Double-click `Open Preview.command` to enter a URL without typing the launch com
 | `--dir DIRECTORY` | Serve a local static build on localhost |
 | `--profile FILE` | Custom JSON profile; default is iPhone 12 Pro Max |
 | `--single-notch` | One physical notch in landscape; default mirrors it at both ends |
-| `--keyboard-image FILE` | Optional keyboard + accessory-bar PNG crop; portrait overlay is 345 CSS px high |
+| `--keyboard-image FILE` | Portrait keyboard + accessory-bar crop |
+| `--keyboard-landscape-image FILE` | Landscape keyboard + accessory-bar crop |
+| `--keyboard-opacity NUMBER` | Overlay opacity, 0–1; default 0.45 |
 | `--verify` | Run resize/input/snapshot diagnostics, leaving the windows open |
 | `--output DIRECTORY` | Diagnostic destination; default `artifacts/check` |
 
@@ -52,4 +54,4 @@ python measurement/crop_keyboard.py /path/to/portrait.png --top 1743 --scale 3 -
 node src/cli.mjs --url https://example.com/ --keyboard-image artifacts/keyboard.png
 ```
 
-The default portrait reference is a 1284×2778 screenshot whose keyboard starts at native row 1743: 1035/3 = 345 CSS pixels including the accessory bar and home indicator. The image appears on text-field focus and disappears on blur. It is only a visual overlay: it neither types nor resizes the PWA viewport. No keyboard image or user screenshot is bundled. Landscape keyboard geometry requires a separate capture and is not extrapolated from portrait. Different devices/keyboards need their own dimensions; the current portrait overlay height is fixed at this measured reference.
+The default portrait reference is a 1284×2778 screenshot whose keyboard starts at native row 1743: 1035/3 = 345 CSS pixels including the accessory bar and home indicator. The image appears on text-field focus and disappears on blur. It is only a visual overlay: it neither types nor resizes the PWA viewport. No keyboard image or user screenshot is bundled. Landscape uses its own screenshot crop. Each overlay height is calculated from its image aspect ratio at the fixed viewport width; a 1280×310 landscape crop is 224.27 CSS pixels high at width 926. Both views default to 45% opacity, revealing covered UI underneath. Local crops at `artifacts/keyboards/portrait.png` and `landscape.png` are loaded automatically and never tracked by Git.

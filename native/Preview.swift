@@ -16,6 +16,8 @@ struct Config:Decodable {
     let profile:Profile
     let segments:[Segment]
     let keyboardPath:String?
+    let keyboardLandscapePath:String?
+    let keyboardOpacity:Double?
     let bothNotches:Bool
     let verify:Bool
     let output:String
@@ -104,7 +106,8 @@ final class Shell:NSView {
         super.init(frame:frame)
         wantsLayer=true;layer?.backgroundColor=NSColor(calibratedWhite:0.15,alpha:1).cgColor
         addSubview(stage);stage.addSubview(web);stage.addSubview(keyboard);stage.addSubview(home);stage.addSubview(fade)
-        if let imagePath=config.keyboardPath {keyboard.image=NSImage(contentsOfFile:imagePath)}
+        if let imagePath=(landscape ? config.keyboardLandscapePath : config.keyboardPath) {keyboard.image=NSImage(contentsOfFile:imagePath)}
+        keyboard.alphaValue=CGFloat(config.keyboardOpacity ?? 0.45)
         keyboard.imageScaling = .scaleAxesIndependently;keyboard.isHidden=true
         fade.landscape=landscape
         web.frame=NSRect(origin:.zero,size:phone);fade.frame=web.frame
@@ -118,12 +121,13 @@ final class Shell:NSView {
         stage.bounds=NSRect(origin:.zero,size:phone)
         // Child frame/bounds stay fixed: only the ancestor's presentation transform changes.
         web.frame=NSRect(origin:.zero,size:phone);fade.frame=web.frame;fade.needsDisplay=true
-        // Portrait screenshot: 1035 native pixels / 3 = 345 CSS pixels, including accessory bar.
-        // No landscape keyboard image is inferred from a portrait-only reference.
-        keyboard.frame=NSRect(x:0,y:0,width:phone.width,height:345)
-        keyboard.isHidden = !keyboardShown || landscape || keyboard.image == nil
+        // Use each crop's actual aspect ratio, including its accessory bar.
+        let imageSize=keyboard.image?.size ?? NSSize(width:phone.width,height:345)
+        let height=phone.width*imageSize.height/imageSize.width
+        keyboard.frame=NSRect(x:0,y:0,width:phone.width,height:height)
+        keyboard.isHidden = !keyboardShown || keyboard.image == nil
         home.frame=web.frame;home.needsDisplay=true
-        home.isHidden = !keyboard.isHidden
+        home.isHidden=false
     }
 }
 final class Host:NSObject,NSApplicationDelegate,NSWindowDelegate,WKScriptMessageHandler {
@@ -133,7 +137,7 @@ final class Host:NSObject,NSApplicationDelegate,NSWindowDelegate,WKScriptMessage
     func userContentController(_ userContentController:WKUserContentController,didReceive message:WKScriptMessage){
         if message.name == "keyboard",let data=message.body as? [String:Any],let orientation=data["orientation"] as? String,let visible=data["visible"] as? Bool {
             let i=orientation == "portrait" ? 0:1
-            if shells.indices.contains(i){shells[i].keyboardShown=visible;shells[i].layoutSubtreeIfNeeded()}
+            if shells.indices.contains(i){shells[i].keyboardShown=visible;shells[i].layoutSubtreeIfNeeded();if config.verify {print("KEYBOARD \(orientation) visible=\(!shells[i].keyboard.isHidden) height=\(shells[i].keyboard.frame.height) opacity=\(shells[i].keyboard.alphaValue)");fflush(stdout)}}
             return
         }
         guard let data=message.body as? [String:Any], let orientation=data["orientation"] as? String else{return}
@@ -201,7 +205,7 @@ final class Host:NSObject,NSApplicationDelegate,NSWindowDelegate,WKScriptMessage
                         const area=document.createElement('div');area.style.cssText='position:fixed;left:10px;top:10px;width:120px;height:60px;overflow:auto;touch-action:pan-x;z-index:999999';area.innerHTML='<div style="width:600px;height:40px"></div>';document.body.append(area);
                         const drag=()=>{for(const [type,x,buttons] of [['pointerdown',90,1],['pointermove',30,1],['pointerup',30,0]])area.dispatchEvent(new PointerEvent(type,{bubbles:true,cancelable:true,pointerType:'mouse',pointerId:988,button:0,buttons,clientX:x,clientY:30}));};
                         drag();const allowedPanPixels=area.scrollLeft;area.scrollLeft=0;area.style.touchAction='none';drag();const lockedPanPixels=area.scrollLeft;area.remove();
-                        window.webkit.messageHandlers.report.postMessage({orientation:'\(i==0 ? "portrait":"landscape")',width:innerWidth,height:innerHeight,dpr:devicePixelRatio,inputIdleEvents:idle,inputEvents:seen,allowedPanPixels,lockedPanPixels});report();
+                        window.webkit.messageHandlers.report.postMessage({orientation:'\(i==0 ? "portrait":"landscape")',width:innerWidth,height:innerHeight,dpr:devicePixelRatio,inputIdleEvents:idle,inputEvents:seen,allowedPanPixels,lockedPanPixels});report();document.getElementById('text')?.focus();
                         })()
                         """,completionHandler:nil)
                         let snap=WKSnapshotConfiguration();snap.snapshotWidth=NSNumber(value:Double(web.bounds.width*max(2,web.window?.backingScaleFactor ?? 2)))
